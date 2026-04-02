@@ -9,6 +9,7 @@ from passlib.context import CryptContext
 from datetime import datetime, timedelta
 from pydantic import BaseModel
 from typing import Optional
+from contextlib import asynccontextmanager
 import os
 
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://mario:mariopass123@db:5432/mariodb")
@@ -45,8 +46,6 @@ class BestScore(Base):
     best_level = Column(Integer, default=1)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     user = relationship("User", back_populates="best_score")
-
-Base.metadata.create_all(bind=engine)
 
 class UserCreate(BaseModel):
     username: str
@@ -97,7 +96,12 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     if not user: raise HTTPException(status_code=401, detail="User not found")
     return user
 
-app = FastAPI(title="Mario Game API")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    Base.metadata.create_all(bind=engine)
+    yield
+
+app = FastAPI(title="Mario Game API", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 @app.post("/api/register", response_model=UserOut)
