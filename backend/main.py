@@ -6,10 +6,13 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 from datetime import datetime, timedelta
 from typing import Optional
-import models, schemas, database
-from database import engine, get_db
+from backend.models import User, Score, BestScore
+from backend.schemas import UserCreate, UserOut, ScoreCreate
+from backend import database
+from backend.database import engine, get_db
+import backend.models as models_module
 
-models.Base.metadata.create_all(bind=engine)
+models_module.Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="Mario Game API")
 
@@ -49,18 +52,18 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
             raise credentials_exception
     except JWTError:
         raise credentials_exception
-    user = db.query(models.User).filter(models.User.username == username).first()
+    user = db.query(User).filter(User.username == username).first()
     if user is None:
         raise credentials_exception
     return user
 
-@app.post("/api/register", response_model=schemas.UserOut)
-def register(user: schemas.UserCreate, db: Session = Depends(get_db)):
-    if db.query(models.User).filter(models.User.username == user.username).first():
+@app.post("/api/register", response_model=UserOut)
+def register(user: UserCreate, db: Session = Depends(get_db)):
+    if db.query(User).filter(User.username == user.username).first():
         raise HTTPException(status_code=400, detail="Username already taken")
-    if db.query(models.User).filter(models.User.email == user.email).first():
+    if db.query(User).filter(User.email == user.email).first():
         raise HTTPException(status_code=400, detail="Email already registered")
-    db_user = models.User(
+    db_user = User(
         username=user.username,
         email=user.email,
         hashed_password=hash_password(user.password)
@@ -72,19 +75,19 @@ def register(user: schemas.UserCreate, db: Session = Depends(get_db)):
 
 @app.post("/api/login")
 def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
-    user = db.query(models.User).filter(models.User.username == form_data.username).first()
+    user = db.query(User).filter(User.username == form_data.username).first()
     if not user or not verify_password(form_data.password, user.hashed_password):
         raise HTTPException(status_code=401, detail="Invalid credentials")
     token = create_access_token({"sub": user.username}, timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
     return {"access_token": token, "token_type": "bearer", "username": user.username, "user_id": user.id}
 
-@app.get("/api/me", response_model=schemas.UserOut)
-def get_me(current_user: models.User = Depends(get_current_user)):
+@app.get("/api/me", response_model=UserOut)
+def get_me(current_user: User = Depends(get_current_user)):
     return current_user
 
 @app.post("/api/scores")
-def submit_score(score: schemas.ScoreCreate, current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
-    db_score = models.Score(
+def submit_score(score: ScoreCreate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    db_score = Score(
         user_id=current_user.id,
         score=score.score,
         level=score.level,
@@ -94,10 +97,9 @@ def submit_score(score: schemas.ScoreCreate, current_user: models.User = Depends
     db.add(db_score)
     db.commit()
     db.refresh(db_score)
-    # Update best score
-    best = db.query(models.BestScore).filter(models.BestScore.user_id == current_user.id).first()
+    best = db.query(BestScore).filter(BestScore.user_id == current_user.id).first()
     if not best:
-        best = models.BestScore(user_id=current_user.id, best_score=score.score, best_level=score.level)
+        best = BestScore(user_id=current_user.id, best_score=score.score, best_level=score.level)
         db.add(best)
     elif score.score > best.best_score:
         best.best_score = score.score
@@ -109,9 +111,9 @@ def submit_score(score: schemas.ScoreCreate, current_user: models.User = Depends
 @app.get("/api/leaderboard")
 def get_leaderboard(limit: int = 10, db: Session = Depends(get_db)):
     results = (
-        db.query(models.BestScore, models.User)
-        .join(models.User, models.BestScore.user_id == models.User.id)
-        .order_by(models.BestScore.best_score.desc())
+        db.query(BestScore, User)
+        .join(User, BestScore.user_id == User.id)
+        .order_by(BestScore.best_score.desc())
         .limit(limit)
         .all()
     )
@@ -127,8 +129,8 @@ def get_leaderboard(limit: int = 10, db: Session = Depends(get_db)):
     ]
 
 @app.get("/api/my-scores")
-def get_my_scores(current_user: models.User = Depends(get_current_user), db: Session = Depends(get_db)):
-    scores = db.query(models.Score).filter(models.Score.user_id == current_user.id).order_by(models.Score.created_at.desc()).limit(10).all()
+def get_my_scores(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    scores = db.query(Score).filter(Score.user_id == current_user.id).order_by(Score.created_at.desc()).limit(10).all()
     return scores
 
 @app.get("/")
